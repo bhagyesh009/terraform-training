@@ -1,0 +1,778 @@
+
+## DAY 2 — GCS ADVANCED CONFIGURATION & SECURITY
+
+---
+
+# 1. Day 2 Overview
+
+Day 2 focuses on managing advanced GCS features using Terraform.
+
+Topics:
+
+* GCS Storage Classes
+* Object Versioning
+* Lifecycle Rules
+* Object Management
+* IAM
+* Bucket Security
+* Public Access Prevention
+* Retention Policy
+* Encryption
+* Terraform References
+* Practical GCS Project
+
+---
+
+# 2. GCS Bucket Architecture
+
+```text
+GCP Project
+     |
+     v
+   Bucket
+     |
+     +---- Storage Class
+     |
+     +---- Versioning
+     |
+     +---- Lifecycle Rules
+     |
+     +---- IAM
+     |
+     +---- Retention Policy
+     |
+     +---- Encryption
+     |
+     +---- Objects
+```
+
+---
+
+# 3. Storage Classes
+
+GCS provides different storage classes based on access frequency.
+
+| Storage Class | Typical Use                           |
+| ------------- | ------------------------------------- |
+| STANDARD      | Frequently accessed data              |
+| NEARLINE      | Data accessed approximately monthly   |
+| COLDLINE      | Data accessed approximately quarterly |
+| ARCHIVE       | Long-term archival data               |
+
+Example:
+
+```hcl
+storage_class = "STANDARD"
+```
+
+---
+
+# 4. Configure Storage Class
+
+Update the bucket:
+
+```hcl
+resource "google_storage_bucket" "training" {
+  name          = var.bucket_name
+  location      = var.region
+  storage_class = "STANDARD"
+
+  uniform_bucket_level_access = true
+  force_destroy               = false
+
+  labels = {
+    environment = "dev"
+    managed_by  = "terraform"
+    purpose     = "training"
+  }
+}
+```
+
+The storage class determines the storage pricing and access characteristics of objects stored in the bucket.
+
+---
+
+# 5. Object Versioning
+
+Versioning keeps previous versions of objects when they are replaced or deleted.
+
+Enable versioning:
+
+```hcl
+resource "google_storage_bucket" "training" {
+  name          = var.bucket_name
+  location      = var.region
+  storage_class = "STANDARD"
+
+  versioning {
+    enabled = true
+  }
+
+  uniform_bucket_level_access = true
+  force_destroy               = false
+}
+```
+
+---
+
+# 6. How Versioning Works
+
+Without versioning:
+
+```text
+file.txt
+   |
+   v
+New file.txt
+   |
+   v
+Old content replaced
+```
+
+With versioning:
+
+```text
+file.txt
+   |
+   +---- Version 1
+   |
+   +---- Version 2
+   |
+   +---- Version 3
+```
+
+This can help recover previous object versions.
+
+---
+
+# 7. Versioning with Terraform
+
+Example:
+
+```hcl
+versioning {
+  enabled = true
+}
+```
+
+Apply:
+
+```bash
+terraform plan
+terraform apply
+```
+
+Verify:
+
+```bash
+gcloud storage ls --all-versions gs://BUCKET_NAME
+```
+
+---
+
+# 8. Lifecycle Rules
+
+Lifecycle rules automatically perform actions on objects based on conditions.
+
+Common use cases:
+
+* Delete old objects
+* Delete old versions
+* Change storage class
+* Remove temporary files
+* Control storage costs
+
+Example:
+
+```hcl
+lifecycle_rule {
+  condition {
+    age = 30
+  }
+
+  action {
+    type = "Delete"
+  }
+}
+```
+
+Meaning:
+
+```text
+Object
+  |
+  | 30 days old
+  v
+Delete
+```
+
+---
+
+# 9. Lifecycle Rule — Delete Old Objects
+
+```hcl
+resource "google_storage_bucket" "training" {
+  name          = var.bucket_name
+  location      = var.region
+  storage_class = "STANDARD"
+
+  lifecycle_rule {
+    condition {
+      age = 30
+    }
+
+    action {
+      type = "Delete"
+    }
+  }
+
+  uniform_bucket_level_access = true
+  force_destroy               = false
+}
+```
+
+Objects older than 30 days become eligible for deletion according to the lifecycle configuration.
+
+---
+
+# 10. Lifecycle Rule — Change Storage Class
+
+Example:
+
+```hcl
+lifecycle_rule {
+  condition {
+    age = 30
+  }
+
+  action {
+    type          = "SetStorageClass"
+    storage_class = "NEARLINE"
+  }
+}
+```
+
+Flow:
+
+```text
+STANDARD
+    |
+    | 30 days
+    v
+NEARLINE
+```
+
+Another example:
+
+```hcl
+lifecycle_rule {
+  condition {
+    age = 90
+  }
+
+  action {
+    type          = "SetStorageClass"
+    storage_class = "COLDLINE"
+  }
+}
+```
+
+---
+
+# 11. Multiple Lifecycle Rules
+
+A bucket can contain multiple lifecycle rules.
+
+Example:
+
+```hcl
+lifecycle_rule {
+  condition {
+    age = 30
+  }
+
+  action {
+    type          = "SetStorageClass"
+    storage_class = "NEARLINE"
+  }
+}
+
+lifecycle_rule {
+  condition {
+    age = 90
+  }
+
+  action {
+    type = "Delete"
+  }
+}
+```
+
+Flow:
+
+```text
+Object Created
+      |
+      | 30 days
+      v
+  NEARLINE
+      |
+      | 90 days
+      v
+   DELETE
+```
+
+---
+
+# 12. Object Creation
+
+Terraform can also upload an object to GCS.
+
+Example:
+
+```hcl
+resource "google_storage_bucket_object" "training_file" {
+  name   = "training/example.txt"
+  bucket = google_storage_bucket.training.name
+  content = "Terraform GCS Training"
+}
+```
+
+This creates:
+
+```text
+Bucket
+  |
+  +---- training/
+          |
+          +---- example.txt
+```
+
+---
+
+# 13. Upload a Local File
+
+Instead of inline content:
+
+```hcl
+resource "google_storage_bucket_object" "config" {
+  name   = "config/application.conf"
+  bucket = google_storage_bucket.training.name
+  source = "files/application.conf"
+}
+```
+
+Project structure:
+
+```text
+gcs-training/
+│
+├── providers.tf
+├── variables.tf
+├── terraform.tfvars
+├── main.tf
+├── outputs.tf
+│
+└── files/
+    └── application.conf
+```
+
+Terraform uploads the local file to GCS.
+
+---
+
+# 14. Object Metadata
+
+Object metadata can also be configured.
+
+Example:
+
+```hcl
+resource "google_storage_bucket_object" "training_file" {
+  name   = "training/example.txt"
+  bucket = google_storage_bucket.training.name
+
+  content = "Terraform GCS Training"
+
+  metadata = {
+    environment = "dev"
+    owner       = "terraform-training"
+  }
+}
+```
+
+---
+
+# 15. Bucket IAM
+
+GCS access can be controlled using IAM.
+
+Example:
+
+```hcl
+resource "google_storage_bucket_iam_member" "viewer" {
+  bucket = google_storage_bucket.training.name
+  role   = "roles/storage.objectViewer"
+  member = "user:USER_EMAIL"
+}
+```
+
+Replace:
+
+```text
+USER_EMAIL
+```
+
+with the required user identity.
+
+---
+
+# 16. Common GCS IAM Roles
+
+| Role                          | Purpose                           |
+| ----------------------------- | --------------------------------- |
+| `roles/storage.objectViewer`  | View/download objects             |
+| `roles/storage.objectCreator` | Create objects                    |
+| `roles/storage.objectUser`    | Read/create/update/delete objects |
+| `roles/storage.admin`         | Full Cloud Storage administration |
+
+Use the least privilege required for the workload.
+
+---
+
+# 17. IAM Member Types
+
+Examples:
+
+```text
+user:user@example.com
+```
+
+```text
+serviceAccount:app@project.iam.gserviceaccount.com
+```
+
+```text
+group:devops@example.com
+```
+
+Avoid granting broad access when a more specific IAM role is sufficient.
+
+---
+
+# 18. Public Access Prevention
+
+Public access prevention can be enabled on the bucket.
+
+```hcl
+resource "google_storage_bucket" "training" {
+  name                        = var.bucket_name
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+
+  force_destroy = false
+}
+```
+
+This helps prevent accidental public exposure of bucket data.
+
+---
+
+# 19. Public vs Private Bucket
+
+### Private Bucket
+
+```text
+User
+  |
+  v
+IAM
+  |
+  v
+GCS Bucket
+```
+
+Access is controlled through IAM.
+
+### Public Bucket
+
+```text
+Internet
+    |
+    v
+GCS Bucket
+```
+
+Objects can potentially be accessed without authenticated IAM access.
+
+For application data, backups and internal files, access should normally be explicitly controlled.
+
+---
+
+# 20. Retention Policy
+
+A retention policy can prevent objects from being deleted or modified until a specified retention period has passed.
+
+Example:
+
+```hcl
+retention_policy {
+  retention_period = 86400
+}
+```
+
+`86400` seconds = 1 day.
+
+Example:
+
+```text
+Object Created
+      |
+      v
+Retention Period
+      |
+      v
+Object can be deleted after retention requirement
+```
+
+---
+
+# 21. Retention Policy Example
+
+```hcl
+resource "google_storage_bucket" "training" {
+  name     = var.bucket_name
+  location = var.region
+
+  retention_policy {
+    retention_period = 86400
+  }
+
+  uniform_bucket_level_access = true
+}
+```
+
+Retention policies are useful for:
+
+* Compliance
+* Audit data
+* Backup data
+* Log retention
+* Regulatory requirements
+
+---
+
+# 22. Bucket Encryption
+
+GCS encrypts data at rest by default.
+
+Terraform can also configure a customer-managed encryption key.
+
+Example:
+
+```hcl
+resource "google_storage_bucket" "training" {
+  name     = var.bucket_name
+  location = var.region
+
+  encryption {
+    default_kms_key_name = var.kms_key_name
+  }
+
+  uniform_bucket_level_access = true
+}
+```
+
+Variable:
+
+```hcl
+variable "kms_key_name" {
+  type        = string
+  description = "Cloud KMS key used for bucket encryption"
+}
+```
+
+---
+
+# 23. Terraform Resource Dependencies
+
+Example:
+
+```hcl
+bucket = google_storage_bucket.training.name
+```
+
+Terraform understands that:
+
+```text
+google_storage_bucket.training
+```
+
+must exist before:
+
+```text
+google_storage_bucket_object.training_file
+```
+
+is created.
+
+Flow:
+
+```text
+Create Bucket
+     |
+     v
+Upload Object
+```
+
+This is an implicit dependency.
+
+---
+
+# 24. Explicit Dependency
+
+Example:
+
+```hcl
+depends_on = [
+  google_project_service.storage_api
+]
+```
+
+This creates an explicit dependency.
+
+Flow:
+
+```text
+Enable API
+    |
+    v
+Create Bucket
+```
+
+Use `depends_on` when Terraform cannot automatically determine the dependency.
+
+---
+
+# 25. Complete Day 2 Bucket
+
+A practical bucket configuration can combine the concepts:
+
+```hcl
+resource "google_storage_bucket" "training" {
+  name          = var.bucket_name
+  location      = var.region
+  storage_class = "STANDARD"
+
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = false
+
+  versioning {
+    enabled = true
+  }
+
+  lifecycle_rule {
+    condition {
+      age = 30
+    }
+
+    action {
+      type          = "SetStorageClass"
+      storage_class = "NEARLINE"
+    }
+  }
+
+  lifecycle_rule {
+    condition {
+      age = 90
+    }
+
+    action {
+      type = "Delete"
+    }
+  }
+
+  labels = {
+    environment = "dev"
+    managed_by  = "terraform"
+    purpose     = "training"
+  }
+
+  depends_on = [
+    google_project_service.storage_api
+  ]
+}
+```
+
+---
+
+# 26. Object Example
+
+```hcl
+resource "google_storage_bucket_object" "training_file" {
+  name   = "training/example.txt"
+  bucket = google_storage_bucket.training.name
+
+  content = "Terraform GCS Day 2 Training"
+
+  metadata = {
+    environment = "dev"
+    managed_by  = "terraform"
+  }
+}
+```
+
+---
+
+# 27. IAM Example
+
+```hcl
+resource "google_storage_bucket_iam_member" "viewer" {
+  bucket = google_storage_bucket.training.name
+  role   = "roles/storage.objectViewer"
+  member = "user:USER_EMAIL"
+}
+```
+
+Replace:
+
+```text
+USER_EMAIL
+```
+
+with the required user account.
+
+---
+
+# 28. Outputs
+
+Update `outputs.tf`:
+
+```hcl
+output "bucket_name" {
+  value = google_storage_bucket.training.name
+}
+
+output "bucket_location" {
+  value = google_storage_bucket.training.location
+}
+
+output "bucket_url" {
+  value = google_storage_bucket.training.url
+}
+
+output "training_object" {
+  value = google_storage_bucket_object.training_file.name
+}
+```
+
+Run:
+
+```bash
+terraform output
+```
+
+---
+

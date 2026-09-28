@@ -1,0 +1,673 @@
+
+## DAY 1 — BASIC GCS CREATION
+
+---
+
+## 1. Prerequisites
+
+* Terraform installed
+* Google Cloud CLI installed
+* GCP project available
+* Billing enabled
+* GCP authentication configured
+* Required GCP permissions available
+* VS Code configured
+
+Terraform will run from the local machine and create resources in GCP through the Google provider.
+
+```text
+Local Machine
+      |
+      v
+Terraform
+      |
+      v
+Google Provider
+      |
+      v
+GCP APIs
+      |
+      v
+GCS
+```
+
+---
+
+# 2. GCP Authentication
+
+For local development:
+
+```bash
+gcloud auth application-default login
+```
+
+Set the GCP project:
+
+```bash
+gcloud config set project PROJECT_ID
+```
+
+Verify:
+
+```bash
+gcloud config get-value project
+```
+
+The Cloud Storage API will be enabled through Terraform.
+
+---
+
+# 3. Terraform Project Structure
+
+```text
+gcs-training/
+│
+├── providers.tf
+├── variables.tf
+├── terraform.tfvars
+├── main.tf
+└── outputs.tf
+```
+
+### File Purpose
+
+| File               | Purpose                  |
+| ------------------ | ------------------------ |
+| `providers.tf`     | Provider configuration   |
+| `variables.tf`     | Variable declarations    |
+| `terraform.tfvars` | Variable values          |
+| `main.tf`          | Infrastructure resources |
+| `outputs.tf`       | Output values            |
+
+Terraform automatically loads `.tf` files from the same directory.
+
+---
+
+# 4. Google Provider
+
+### providers.tf
+
+```hcl
+terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
+  }
+}
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+```
+
+### Provider
+
+* Connects Terraform to GCP
+* Communicates with GCP APIs
+* Uses configured authentication
+* Uses the specified GCP project
+
+---
+
+# 5. Initialize Terraform
+
+```bash
+terraform init
+```
+
+`terraform init`:
+
+* Initializes the Terraform working directory
+* Downloads required providers
+* Creates the `.terraform` directory
+* Creates or updates `.terraform.lock.hcl`
+
+---
+
+# 6. Variables
+
+### variables.tf
+
+```hcl
+variable "project_id" {
+  type        = string
+  description = "GCP Project ID"
+}
+
+variable "region" {
+  type        = string
+  description = "GCP region"
+  default     = "asia-south1"
+}
+
+variable "bucket_name" {
+  type        = string
+  description = "GCS bucket name"
+}
+```
+
+Variables make the configuration reusable and avoid hardcoding values.
+
+Example:
+
+```hcl
+project = var.project_id
+```
+
+instead of:
+
+```hcl
+project = "my-project-123"
+```
+
+---
+
+# 7. terraform.tfvars
+
+### terraform.tfvars
+
+```hcl
+project_id  = "YOUR-GCP-PROJECT-ID"
+region      = "asia-south1"
+bucket_name = "terraform-gcs-training-UNIQUE-NAME"
+```
+
+GCS bucket names must be globally unique.
+
+Example:
+
+```text
+terraform-gcs-training-12345
+```
+
+Variable flow:
+
+```text
+variables.tf
+      |
+      v
+terraform.tfvars
+      |
+      v
+var.variable_name
+      |
+      v
+Terraform Resource
+```
+
+---
+
+# 8. Enable Cloud Storage API
+
+The Cloud Storage API can also be managed through Terraform.
+
+Add to `main.tf`:
+
+```hcl
+resource "google_project_service" "storage_api" {
+  project = var.project_id
+  service = "storage.googleapis.com"
+
+  disable_on_destroy = false
+}
+```
+
+This enables:
+
+```text
+Cloud Storage API
+storage.googleapis.com
+```
+
+Terraform will manage the API as a resource.
+
+---
+
+# 9. Google Cloud Storage
+
+Google Cloud Storage (GCS) is an object storage service.
+
+Basic structure:
+
+```text
+GCP Project
+     |
+     v
+   Bucket
+     |
+     v
+   Objects
+```
+
+### Bucket
+
+A bucket is a container used to store objects.
+
+### Object
+
+An object is a file stored inside a bucket.
+
+Example:
+
+```text
+Bucket: application-backup
+
+Objects:
+├── database.sql
+├── application.zip
+└── logs/app.log
+```
+
+---
+
+# 10. Create GCS Bucket
+
+### main.tf
+
+```hcl
+resource "google_storage_bucket" "training" {
+  name                        = var.bucket_name
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = false
+
+  labels = {
+    environment = "dev"
+    managed_by  = "terraform"
+    purpose     = "training"
+  }
+
+  depends_on = [
+    google_project_service.storage_api
+  ]
+}
+```
+
+### Resource Syntax
+
+```hcl
+resource "RESOURCE_TYPE" "RESOURCE_NAME" {
+  ...
+}
+```
+
+Example:
+
+```hcl
+resource "google_storage_bucket" "training"
+```
+
+`google_storage_bucket`
+
+* Terraform resource type
+
+`training`
+
+* Terraform resource name
+
+Reference:
+
+```hcl
+google_storage_bucket.training
+```
+
+---
+
+# 11. Resource Dependency
+
+The bucket contains:
+
+```hcl
+depends_on = [
+  google_project_service.storage_api
+]
+```
+
+This creates the dependency:
+
+```text
+Enable Cloud Storage API
+          |
+          v
+    Create GCS Bucket
+```
+
+Terraform will enable the API before creating the bucket.
+
+The explicit dependency is useful here because the bucket requires the API to be enabled.
+
+---
+
+# 12. Terraform Format
+
+```bash
+terraform fmt
+```
+
+Purpose:
+
+* Formats Terraform configuration
+* Standardizes indentation
+* Improves readability
+
+---
+
+# 13. Terraform Validate
+
+```bash
+terraform validate
+```
+
+Purpose:
+
+* Checks Terraform syntax
+* Validates configuration structure
+* Detects configuration errors
+
+---
+
+# 14. Terraform Plan
+
+```bash
+terraform plan
+```
+
+`terraform plan` shows the changes Terraform intends to make.
+
+Example:
+
+```text
+Plan: 2 to add, 0 to change, 0 to destroy.
+```
+
+The two resources are:
+
+```text
+1. google_project_service.storage_api
+2. google_storage_bucket.training
+```
+
+### Plan Symbols
+
+```text
++      Create
+
+~      Update
+
+-      Destroy
+
+-/+    Replace
+```
+
+---
+
+# 15. Create Infrastructure
+
+```bash
+terraform apply
+```
+
+Review the plan and confirm:
+
+```text
+yes
+```
+
+Terraform will:
+
+```text
+Enable Cloud Storage API
+        ↓
+Create GCS Bucket
+```
+
+---
+
+# 16. Verify GCS Bucket
+
+Using GCP Console:
+
+```text
+GCP Console
+    ↓
+Cloud Storage
+    ↓
+Buckets
+```
+
+Using CLI:
+
+```bash
+gcloud storage buckets list
+```
+
+Verify:
+
+* Bucket name
+* Location
+* Labels
+* Access configuration
+
+---
+
+# 17. Bucket Labels
+
+Example:
+
+```hcl
+labels = {
+  environment = "dev"
+  managed_by  = "terraform"
+  purpose     = "training"
+}
+```
+
+Labels can be used for:
+
+* Resource identification
+* Environment tracking
+* Ownership
+* Cost analysis
+* Automation
+
+---
+
+# 18. Uniform Bucket-Level Access
+
+```hcl
+uniform_bucket_level_access = true
+```
+
+This enables IAM-based access control at the bucket level.
+
+Benefits:
+
+* Centralized access management
+* Consistent IAM permissions
+* Simplified bucket access control
+* Avoids relying on object ACLs
+
+---
+
+# 19. Force Destroy
+
+```hcl
+force_destroy = false
+```
+
+When `false`:
+
+* Terraform will not automatically delete objects when destroying a non-empty bucket.
+
+When `true`:
+
+* Terraform can delete objects as part of bucket destruction.
+
+Example:
+
+```hcl
+force_destroy = true
+```
+
+Use carefully because it can result in data deletion.
+
+---
+
+# 20. Terraform Outputs
+
+### outputs.tf
+
+```hcl
+output "bucket_name" {
+  value = google_storage_bucket.training.name
+}
+
+output "bucket_location" {
+  value = google_storage_bucket.training.location
+}
+
+output "bucket_url" {
+  value = google_storage_bucket.training.url
+}
+```
+
+Run:
+
+```bash
+terraform output
+```
+
+Outputs expose useful information from Terraform-managed resources.
+
+---
+
+# 21. Resource References
+
+Terraform allows resources to reference attributes.
+
+Example:
+
+```hcl
+google_storage_bucket.training.name
+```
+
+Other attributes:
+
+```hcl
+google_storage_bucket.training.location
+```
+
+```hcl
+google_storage_bucket.training.url
+```
+
+Resource references can also create dependencies between resources.
+
+---
+
+
+
+# 22. Complete Project
+
+## providers.tf
+
+```hcl
+terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
+  }
+}
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+```
+
+---
+
+## variables.tf
+
+```hcl
+variable "project_id" {
+  type        = string
+  description = "GCP Project ID"
+}
+
+variable "region" {
+  type        = string
+  description = "GCP region"
+  default     = "asia-south1"
+}
+
+variable "bucket_name" {
+  type        = string
+  description = "GCS bucket name"
+}
+```
+
+---
+
+## terraform.tfvars
+
+```hcl
+project_id  = "YOUR-GCP-PROJECT-ID"
+region      = "asia-south1"
+bucket_name = "terraform-gcs-training-UNIQUE-NAME"
+```
+
+---
+
+## main.tf
+
+```hcl
+resource "google_project_service" "storage_api" {
+  project = var.project_id
+  service = "storage.googleapis.com"
+
+  disable_on_destroy = false
+}
+
+resource "google_storage_bucket" "training" {
+  name                        = var.bucket_name
+  location                    = var.region
+  uniform_bucket_level_access = true
+  force_destroy               = false
+
+  labels = {
+    environment = "dev"
+    managed_by  = "terraform"
+    purpose     = "training"
+  }
+
+  depends_on = [
+    google_project_service.storage_api
+  ]
+}
+```
+
+---
+
+## outputs.tf
+
+```hcl
+output "bucket_name" {
+  value = google_storage_bucket.training.name
+}
+
+output "bucket_location" {
+  value = google_storage_bucket.training.location
+}
+
+output "bucket_url" {
+  value = google_storage_bucket.training.url
+}
+```
+
+---
