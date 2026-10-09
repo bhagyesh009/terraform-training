@@ -1,0 +1,212 @@
+TERRAFORM + GCP TRAINING
+DAY 7 — COMPUTE ENGINE: VIRTUAL MACHINES
+
+============================================================
+1. WHAT SERVICE ARE WE USING?
+============================================================
+
+Google Compute Engine provides virtual machines (VMs) that run operating systems and applications on Google Cloud infrastructure.
+
+Terraform resource:
+google_compute_instance
+
+A VM definition usually includes:
+- Name, project, zone, and machine type.
+- Boot disk and operating system image.
+- Network interface and subnet.
+- Optional metadata, startup script, labels, and service account.
+
+============================================================
+2. FILE: providers.tf
+============================================================
+
+Purpose: declare the Google provider and configure the default project and region.
+
+terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
+  }
+}
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+
+============================================================
+3. FILE: variables.tf
+============================================================
+
+variable "project_id" {
+  type        = string
+  description = "GCP project ID"
+}
+
+variable "region" {
+  type        = string
+  description = "Default GCP region"
+  default     = "asia-south1"
+}
+
+variable "zone" {
+  type        = string
+  description = "Zone in which to create the VM"
+  default     = "asia-south1-a"
+}
+
+variable "vm_name" {
+  type        = string
+  description = "Name of the VM"
+  default     = "terraform-training-vm"
+}
+
+variable "machine_type" {
+  type        = string
+  description = "Machine type controlling VM CPU and memory"
+  default     = "e2-micro"
+}
+
+variable "subnetwork" {
+  type        = string
+  description = "Self-link or ID of an existing subnet"
+}
+
+variable "boot_disk_size_gb" {
+  type        = number
+  description = "Boot disk size in GB"
+  default     = 10
+}
+
+============================================================
+4. FILE: terraform.tfvars
+============================================================
+
+project_id       = "YOUR-GCP-PROJECT-ID"
+region           = "asia-south1"
+zone             = "asia-south1-a"
+vm_name          = "terraform-training-vm"
+machine_type     = "e2-micro"
+subnetwork       = "YOUR-SUBNET-SELF-LINK-OR-ID"
+boot_disk_size_gb = 10
+
+Replace placeholders with values from your GCP environment. Confirm the zone exists and that the subnet is in the correct region.
+
+============================================================
+5. FILE: main.tf
+============================================================
+
+resource "google_compute_instance" "training" {
+  name         = var.vm_name
+  project      = var.project_id
+  zone         = var.zone
+  machine_type = var.machine_type
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-12"
+      size  = var.boot_disk_size_gb
+      type  = "pd-balanced"
+    }
+  }
+
+  network_interface {
+    subnetwork = var.subnetwork
+  }
+
+  metadata = {
+    enable-oslogin = "TRUE"
+  }
+
+  labels = {
+    environment = "training"
+    managed_by  = "terraform"
+  }
+}
+
+Resource component explanations:
+- name: VM name shown in Compute Engine.
+- project: project where the VM is created.
+- zone: specific zone where the VM runs.
+- machine_type: determines the VM's vCPU and memory configuration.
+- boot_disk: defines the operating system disk.
+- initialize_params.image: operating system image used to create the boot disk.
+- size: boot disk capacity in GB.
+- type: persistent disk performance/cost type.
+- network_interface: connects the VM to a subnet.
+- metadata: passes VM metadata settings; enable-oslogin enables OS Login integration.
+- labels: searchable key-value metadata for resource organization and billing analysis.
+
+This configuration does not include access_config {}, so it does not request an external IPv4 address. Use an approved private access method such as IAP or a bastion, or intentionally configure an external IP if the lab requires it.
+
+Optional startup script example:
+metadata_startup_script = <<-EOT
+  #!/bin/bash
+  apt-get update
+  apt-get install -y nginx
+  systemctl enable --now nginx
+EOT
+
+Add this argument inside the VM resource only if you want to demonstrate startup scripts. Confirm outbound access and package repositories are available.
+
+============================================================
+6. FILE: outputs.tf
+============================================================
+
+output "instance_name" {
+  description = "Created VM name"
+  value       = google_compute_instance.training.name
+}
+
+output "instance_zone" {
+  description = "Zone where the VM runs"
+  value       = google_compute_instance.training.zone
+}
+
+output "instance_internal_ip" {
+  description = "VM internal IP address"
+  value       = google_compute_instance.training.network_interface[0].network_ip
+}
+
+============================================================
+7. TERRAFORM WORKFLOW
+============================================================
+
+Enable the Compute Engine API and authenticate with an approved method, for example:
+gcloud auth application-default login
+
+Run:
+terraform init
+terraform fmt
+terraform validate
+terraform plan
+terraform apply
+terraform output
+
+Review the plan before applying. Destroy lab resources when no longer needed:
+terraform destroy
+
+============================================================
+8. PRACTICE EXERCISES
+============================================================
+
+1. Change the machine type and inspect the plan.
+2. Increase the boot disk size.
+3. Add the optional startup script and verify the service using approved VM access.
+4. Explain the difference between a zone and a region.
+5. Explain why a subnet is needed for the VM.
+6. Compare internal-only access with an external IP.
+7. Identify which values should be variables and which are resource attributes.
+
+============================================================
+9. KEY TAKEAWAYS
+============================================================
+
+- google_compute_instance provisions a Compute Engine VM.
+- Machine type determines compute capacity.
+- Boot disk settings define the OS disk.
+- Network interface attaches the VM to a subnet.
+- A firewall rule does not assign an external IP.
+- Outputs expose useful attributes after apply.

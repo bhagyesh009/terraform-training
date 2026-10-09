@@ -1,0 +1,377 @@
+TERRAFORM + GCP TRAINING
+DAY 6 — NETWORKING PART 2: FIREWALL RULES
+
+============================================================
+1. WHAT SERVICE ARE WE USING?
+============================================================
+
+Google Cloud VPC Firewall Rules
+
+A VPC firewall rule controls which network traffic is allowed or denied for supported resources in a VPC. Firewall rules help limit access to virtual machines and reduce unnecessary network exposure.
+
+Terraform resource:
+google_compute_firewall
+
+In this lesson, we will:
+- Create a custom VPC and subnet for a self-contained lab.
+- Create an ingress firewall rule allowing SSH (TCP port 22) from a trusted IP range.
+- Attach a VM to the subnet.
+- Apply a network tag to the VM so the firewall rule targets the intended VM.
+- Review outputs and test the Terraform workflow.
+
+Key concepts:
+- INGRESS: traffic coming into a VM or applicable network endpoint.
+- EGRESS: traffic leaving a VM or applicable network endpoint.
+- source_ranges: source IP ranges for ingress traffic.
+- target_tags: network tags identifying VM instances to which the rule applies.
+- allow: protocols and ports allowed by this rule.
+- network: the VPC to which the firewall rule belongs.
+
+Security note:
+Do not allow SSH from 0.0.0.0/0 in a normal training setup. Restrict SSH to a trusted public IP/CIDR or use an approved access method such as IAP TCP forwarding.
+
+============================================================
+2. FILE: providers.tf
+============================================================
+
+Purpose:
+- Declares the Google provider plugin and a version constraint.
+- Configures the default project and region using variables.
+- Uses Application Default Credentials (ADC) or another supported authentication method.
+
+Code:
+
+terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
+  }
+}
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+
+Explanation:
+- required_providers declares which provider plugin Terraform needs.
+- source identifies the official HashiCorp Google provider.
+- version = "~> 7.0" permits compatible 7.x releases, but not 8.x.
+- provider "google" configures the default project and region for resources.
+- var.project_id and var.region are input variables defined in variables.tf.
+
+Before running Terraform, authenticate if needed:
+gcloud auth application-default login
+
+============================================================
+3. FILE: variables.tf
+============================================================
+
+Purpose:
+Defines configurable inputs so resource settings can be changed without editing the resource blocks.
+
+Code:
+
+variable "project_id" {
+  type        = string
+  description = "GCP project ID"
+}
+
+variable "region" {
+  type        = string
+  description = "Region for the subnet and VM"
+  default     = "asia-south1"
+}
+
+variable "zone" {
+  type        = string
+  description = "Zone for the VM"
+  default     = "asia-south1-a"
+}
+
+variable "network_name" {
+  type        = string
+  description = "Name of the VPC network"
+  default     = "training-vpc"
+}
+
+variable "subnet_name" {
+  type        = string
+  description = "Name of the subnet"
+  default     = "training-subnet"
+}
+
+variable "subnet_cidr" {
+  type        = string
+  description = "Primary IPv4 range for the subnet"
+  default     = "10.10.0.0/24"
+}
+
+variable "firewall_name" {
+  type        = string
+  description = "Name of the SSH firewall rule"
+  default     = "allow-ssh-training"
+}
+
+variable "vm_name" {
+  type        = string
+  description = "Name of the training VM"
+  default     = "training-vm"
+}
+
+variable "machine_type" {
+  type        = string
+  description = "Compute Engine machine type"
+  default     = "e2-micro"
+}
+
+variable "ssh_source_ranges" {
+  type        = list(string)
+  description = "Trusted source IP ranges allowed to connect over SSH"
+}
+
+Explanation:
+- string is used for single text values such as names and project IDs.
+- list(string) is used for one or more CIDR ranges.
+- default supplies a value when one is not provided elsewhere.
+- project_id and ssh_source_ranges have no default, so they must be supplied.
+
+============================================================
+4. FILE: terraform.tfvars
+============================================================
+
+Purpose:
+Supplies actual values for the variables declared in variables.tf.
+
+Code:
+
+project_id        = "YOUR-GCP-PROJECT-ID"
+region            = "asia-south1"
+zone              = "asia-south1-a"
+network_name      = "training-vpc"
+subnet_name       = "training-subnet"
+subnet_cidr       = "10.10.0.0/24"
+ssh_source_ranges = ["YOUR.TRUSTED.PUBLIC.IP/32"]
+
+Explanation:
+- Replace YOUR-GCP-PROJECT-ID with the real project ID.
+- Replace YOUR.TRUSTED.PUBLIC.IP/32 with your trusted public IPv4 address in CIDR format.
+- A /32 range represents one IPv4 address.
+- The example is a placeholder; do not paste it unchanged and expect SSH access.
+- Do not use 0.0.0.0/0 for SSH.
+
+============================================================
+5. FILE: main.tf
+============================================================
+
+This example is self-contained and creates the VPC, subnet, firewall rule, and VM. If you already manage the Day 5 VPC and subnet in the same Terraform state/configuration, do not declare duplicate resources. Instead, retain the existing VPC/subnet resource blocks and add the firewall and VM blocks.
+
+A. VPC NETWORK
+
+resource "google_compute_network" "training" {
+  name                    = var.network_name
+  project                 = var.project_id
+  auto_create_subnetworks = false
+  routing_mode            = "REGIONAL"
+}
+
+What the arguments mean:
+- resource "google_compute_network" "training": declares a VPC. "training" is the Terraform local name used to reference it.
+- name: name of the VPC in GCP.
+- project: project in which to create the VPC.
+- auto_create_subnetworks = false: uses custom subnet mode, so subnets are created explicitly.
+- routing_mode = "REGIONAL": uses regional dynamic routing behavior.
+
+B. SUBNETWORK
+
+resource "google_compute_subnetwork" "training" {
+  name                     = var.subnet_name
+  project                  = var.project_id
+  region                   = var.region
+  network                  = google_compute_network.training.id
+  ip_cidr_range            = var.subnet_cidr
+  private_ip_google_access = true
+}
+
+What the arguments mean:
+- name: name of the subnet.
+- project: project where the subnet is created.
+- region: region where the subnet exists.
+- network: reference to the VPC created above; Terraform infers the dependency.
+- ip_cidr_range: internal IPv4 range for the subnet.
+- private_ip_google_access = true: allows eligible resources without external IP addresses to reach supported Google APIs and services through Google's network.
+
+C. FIREWALL RULE
+
+resource "google_compute_firewall" "allow_ssh" {
+  name      = var.firewall_name
+  project   = var.project_id
+  network   = google_compute_network.training.self_link
+  direction = "INGRESS"
+
+  source_ranges = var.ssh_source_ranges
+  target_tags   = ["training-ssh"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+
+What the arguments mean:
+- name: name of the firewall rule in GCP.
+- project: project where the rule is created.
+- network: VPC in which the firewall rule applies.
+- direction = "INGRESS": evaluates incoming traffic.
+- source_ranges: limits the IPv4 source ranges allowed by this rule.
+- target_tags: selects VM instances with the matching network tag.
+- allow: defines the protocols and ports permitted.
+- protocol = "tcp": SSH uses TCP.
+- ports = ["22"]: permits TCP port 22.
+
+D. COMPUTE ENGINE VM
+
+resource "google_compute_instance" "training" {
+  name         = var.vm_name
+  project      = var.project_id
+  zone         = var.zone
+  machine_type = var.machine_type
+  tags         = ["training-ssh"]
+
+  boot_disk {
+    initialize_params {
+      image = "debian-cloud/debian-12"
+      size  = 10
+      type  = "pd-balanced"
+    }
+  }
+
+  network_interface {
+    subnetwork = google_compute_subnetwork.training.id
+  }
+
+  metadata = {
+    enable-oslogin = "TRUE"
+  }
+}
+
+What the arguments mean:
+- name: VM instance name.
+- project: project where the VM is created.
+- zone: zone in which the VM runs; confirm that the zone is available.
+- machine_type: VM CPU and memory configuration.
+- tags: attaches the training-ssh network tag so the firewall rule targets this VM.
+- boot_disk: configures the operating system disk.
+- image: uses the Debian 12 public image family/image.
+- size: boot disk size in GB.
+- type: persistent disk type.
+- network_interface: connects the VM to the subnet.
+- enable-oslogin: enables OS Login integration; the connecting identity still needs the appropriate IAM and OS Login permissions.
+
+Connectivity note:
+No access_config block is present, so this configuration does not assign an external IPv4 address to the VM. The firewall rule alone does not make the VM publicly reachable. Use an approved private access method such as IAP TCP forwarding, or deliberately configure an external IP only when required by the lab.
+
+============================================================
+6. FILE: outputs.tf
+============================================================
+
+Purpose:
+Outputs display useful resource attributes after Terraform applies the configuration. They can also be consumed by other Terraform configurations or modules.
+
+Code:
+
+output "network_name" {
+  description = "Name of the VPC network"
+  value       = google_compute_network.training.name
+}
+
+output "subnet_name" {
+  description = "Name of the subnet"
+  value       = google_compute_subnetwork.training.name
+}
+
+output "firewall_name" {
+  description = "Name of the SSH firewall rule"
+  value       = google_compute_firewall.allow_ssh.name
+}
+
+output "vm_name" {
+  description = "Name of the Compute Engine VM"
+  value       = google_compute_instance.training.name
+}
+
+output "vm_internal_ip" {
+  description = "Internal IPv4 address assigned to the VM"
+  value       = google_compute_instance.training.network_interface[0].network_ip
+}
+
+Explanation:
+- description explains what the output represents.
+- value references an attribute from a Terraform resource.
+- network_interface[0] selects the first network interface.
+- network_ip returns the VM's internal IP address.
+
+============================================================
+7. FILE STRUCTURE
+============================================================
+
+day-6-networking/
+├── providers.tf
+├── variables.tf
+├── terraform.tfvars
+├── main.tf
+└── outputs.tf
+
+Keep these files in the same directory.
+
+============================================================
+8. TERRAFORM WORKFLOW
+============================================================
+
+1. Enable the Compute Engine API in the project.
+2. Authenticate with an approved method, for example:
+   gcloud auth application-default login
+3. Run the following commands from the project directory:
+
+terraform init
+terraform fmt
+terraform validate
+terraform plan
+terraform apply
+
+Inspect outputs:
+
+terraform output
+terraform output vm_internal_ip
+
+When the lab is complete, review the impact before removing resources:
+
+terraform destroy
+
+============================================================
+9. PRACTICE EXERCISES
+============================================================
+
+1. Explain the difference between ingress and egress.
+2. Explain why ssh_source_ranges is a list(string).
+3. Change the allowed SSH source to your trusted public IP/CIDR.
+4. Explain why target_tags and the VM tags must match.
+5. Add an HTTP firewall rule for TCP port 80 only if required for the lab.
+6. Explain why a firewall rule does not assign an external IP address.
+7. Research IAP TCP forwarding as a way to connect without a public VM IP.
+8. Run terraform plan and identify which resources will be created.
+
+============================================================
+10. KEY TAKEAWAYS
+============================================================
+
+- google_compute_firewall controls traffic for resources in a VPC.
+- INGRESS is incoming traffic; EGRESS is outgoing traffic.
+- source_ranges restricts the allowed source addresses for ingress.
+- target_tags selects the VM instances affected by the rule.
+- allow specifies permitted protocols and ports.
+- VM network tags must match the firewall rule target tags.
+- Firewall rules, external IP assignment, routing, and IAM permissions are separate controls.
+- Always review terraform plan before applying or destroying resources.

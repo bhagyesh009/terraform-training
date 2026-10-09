@@ -1,0 +1,268 @@
+TERRAFORM + GCP TRAINING
+DAY 5 — NETWORKING PART 1: VPC NETWORK AND SUBNETWORK
+
+============================================================
+1. WHAT SERVICES ARE WE USING?
+============================================================
+
+Google Cloud VPC (Virtual Private Cloud)
+A VPC is a virtual network for your GCP resources. It provides network-level connectivity and separation for virtual machines and other supported services. A VPC network is a global resource.
+
+Terraform resource:
+google_compute_network
+
+Google Cloud Subnetwork
+A subnet is an IP address range inside a VPC. Subnets are regional resources. VM network interfaces use a subnet to obtain internal IP addresses. A VPC can contain subnets in multiple regions.
+
+Terraform resource:
+google_compute_subnetwork
+
+In this lesson, we will create:
+- One custom-mode VPC named training-vpc.
+- One subnet named training-subnet in asia-south1.
+- An IPv4 range of 10.10.0.0/24 for that subnet.
+
+Why use a custom-mode VPC?
+A custom-mode VPC lets you explicitly define subnet names, regions, and IP ranges. This is useful for predictable network design and for avoiding automatically created subnets.
+
+============================================================
+2. FILE: providers.tf
+============================================================
+
+Purpose:
+- Declares the Terraform Google provider plugin and its version constraint.
+- Configures the provider to use the project and default region supplied through variables.
+- Authentication is normally provided through Application Default Credentials (ADC), for example by running:
+  gcloud auth application-default login
+
+Code:
+
+terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
+  }
+}
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+
+Explanation:
+- required_providers tells Terraform which provider plugin to install.
+- source identifies the official HashiCorp Google provider.
+- version = "~> 7.0" allows compatible 7.x versions, but not 8.x.
+- provider "google" configures where Terraform should create resources.
+- var.project_id and var.region refer to input variables defined in variables.tf.
+
+============================================================
+3. FILE: variables.tf
+============================================================
+
+Purpose:
+Variables make the configuration reusable. Instead of hardcoding the project, region, VPC name, subnet name, and CIDR range inside main.tf, we define them as inputs.
+
+Code:
+
+variable "project_id" {
+  type        = string
+  description = "GCP project ID"
+}
+
+variable "region" {
+  type        = string
+  description = "Region where the subnet will be created"
+  default     = "asia-south1"
+}
+
+variable "network_name" {
+  type        = string
+  description = "Name of the VPC network"
+  default     = "training-vpc"
+}
+
+variable "subnet_name" {
+  type        = string
+  description = "Name of the subnet"
+  default     = "training-subnet"
+}
+
+variable "subnet_cidr" {
+  type        = string
+  description = "Primary IPv4 range for the subnet"
+  default     = "10.10.0.0/24"
+}
+
+Explanation:
+- type = string means the input value must be a string.
+- description documents what the variable is for.
+- default provides a value if the user does not supply one.
+- project_id has no default, so it must be supplied through terraform.tfvars, the CLI, or another supported input method.
+- 10.10.0.0/24 is the subnet's internal IPv4 range. Make sure it does not overlap with other connected networks.
+
+============================================================
+4. FILE: terraform.tfvars
+============================================================
+
+Purpose:
+This file supplies values for the variables declared in variables.tf.
+
+Code:
+
+project_id = "YOUR-GCP-PROJECT-ID"
+region     = "asia-south1"
+
+Explanation:
+- Replace YOUR-GCP-PROJECT-ID with your actual GCP project ID.
+- network_name, subnet_name, and subnet_cidr use their defaults from variables.tf.
+- terraform.tfvars is automatically loaded by Terraform when running commands from this directory.
+- Do not commit secrets to source control. Project IDs and network names are not passwords, but follow your organization's repository practices.
+
+============================================================
+5. FILE: main.tf
+============================================================
+
+Purpose:
+This file defines the actual GCP network resources.
+
+A. Create the VPC network
+
+resource "google_compute_network" "training" {
+  name                    = var.network_name
+  project                 = var.project_id
+  auto_create_subnetworks = false
+  routing_mode            = "REGIONAL"
+}
+
+What each argument does:
+- resource "google_compute_network" "training": declares a VPC resource. "training" is Terraform's local name for referencing this resource in code.
+- name: the name shown in GCP.
+- project: the project where the VPC is created.
+- auto_create_subnetworks = false: creates a custom-mode VPC. You will create subnets explicitly.
+- routing_mode = "REGIONAL": uses regional dynamic routing behavior for the VPC.
+
+B. Create a subnet
+
+resource "google_compute_subnetwork" "training" {
+  name                     = var.subnet_name
+  project                  = var.project_id
+  region                   = var.region
+  network                  = google_compute_network.training.id
+  ip_cidr_range            = var.subnet_cidr
+  private_ip_google_access = true
+}
+
+What each argument does:
+- name: the subnet name in GCP.
+- project: the project where the subnet is created.
+- region: the GCP region for the subnet.
+- network: references the VPC created above. This reference also tells Terraform the dependency order.
+- ip_cidr_range: the subnet's primary internal IPv4 range.
+- private_ip_google_access = true: allows supported resources without external IP addresses in this subnet to reach Google APIs and services using their internal IP addresses and Google's network path.
+
+Important:
+The VPC is global, while the subnet is regional. Terraform creates the VPC before the subnet because the subnet references the VPC ID.
+
+============================================================
+6. FILE: outputs.tf
+============================================================
+
+Purpose:
+Outputs show useful values after Terraform creates the resources. They can also be referenced by other Terraform configurations or modules.
+
+Code:
+
+output "network_name" {
+  description = "Name of the created VPC"
+  value       = google_compute_network.training.name
+}
+
+output "network_self_link" {
+  description = "Self-link of the created VPC"
+  value       = google_compute_network.training.self_link
+}
+
+output "subnet_name" {
+  description = "Name of the created subnet"
+  value       = google_compute_subnetwork.training.name
+}
+
+output "subnet_cidr" {
+  description = "Primary IP range of the subnet"
+  value       = google_compute_subnetwork.training.ip_cidr_range
+}
+
+Explanation:
+- output defines a value Terraform should display or expose.
+- value reads an attribute from a resource.
+- The resource references use the format resource_type.local_name.attribute.
+- network_self_link can be useful when configuring resources that need the VPC reference.
+
+============================================================
+7. PROJECT FILE STRUCTURE
+============================================================
+
+day-5-networking/
+├── providers.tf
+├── variables.tf
+├── terraform.tfvars
+├── main.tf
+└── outputs.tf
+
+Keep all five files in the same directory for this exercise.
+
+============================================================
+8. RUN TERRAFORM
+============================================================
+
+Before running Terraform:
+1. Confirm that billing is enabled for the project.
+2. Enable the Compute Engine API, either in the Console or through an approved Terraform configuration.
+3. Authenticate, for example:
+   gcloud auth application-default login
+4. Ensure your identity has permission to create VPC networks and subnets.
+
+Run these commands from the day-5-networking directory:
+
+terraform init
+terraform fmt
+terraform validate
+terraform plan
+terraform apply
+
+Inspect outputs:
+
+terraform output
+terraform output network_name
+terraform output subnet_cidr
+
+When finished with the lab, review the impact and remove the resources if they are no longer needed:
+
+terraform destroy
+
+============================================================
+9. PRACTICE EXERCISES
+============================================================
+
+1. Change network_name to dev-vpc and apply.
+2. Change subnet_cidr to 10.20.0.0/24 and review the plan.
+3. Explain why auto_create_subnetworks is set to false.
+4. Explain the difference between a VPC and a subnet.
+5. Identify which resource is global and which is regional.
+6. Run terraform output and identify the subnet CIDR.
+7. Add a second subnet in another region, ensuring that its CIDR range does not overlap.
+
+============================================================
+10. KEY TAKEAWAYS
+============================================================
+
+- google_compute_network creates the VPC.
+- google_compute_subnetwork creates a regional subnet within the VPC.
+- variables.tf defines inputs; terraform.tfvars supplies values.
+- main.tf declares resources.
+- outputs.tf exposes useful resource attributes.
+- Resource references let Terraform infer dependencies.
+- Review terraform plan before applying infrastructure changes.

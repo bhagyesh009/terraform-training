@@ -1,0 +1,251 @@
+TERRAFORM + GCP TRAINING
+DAY 8 — GKE: KUBERNETES CLUSTER AND NODE POOL
+
+============================================================
+1. WHAT SERVICES ARE WE USING?
+============================================================
+
+Google Kubernetes Engine (GKE) is Google's managed Kubernetes service. It provides a Kubernetes control plane and can run worker nodes that host application pods.
+
+Terraform resources:
+- google_container_cluster: creates the GKE cluster and configures cluster-level settings.
+- google_container_node_pool: manages a group of worker nodes separately from the cluster.
+
+This lesson uses a Standard, VPC-native cluster and a separately managed node pool. GKE can incur meaningful costs; review pricing and clean up the lab afterward.
+
+Network prerequisite:
+A VPC-native cluster needs subnet secondary IP ranges for Pods and Services, unless you choose a different supported networking design. The subnet used here must have secondary ranges named gke-pods and gke-services before creating the cluster.
+
+============================================================
+2. FILE: providers.tf
+============================================================
+
+terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
+  }
+}
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+
+============================================================
+3. FILE: variables.tf
+============================================================
+
+variable "project_id" {
+  type        = string
+  description = "GCP project ID"
+}
+
+variable "region" {
+  type        = string
+  description = "Region for the regional GKE cluster"
+  default     = "asia-south1"
+}
+
+variable "cluster_name" {
+  type        = string
+  description = "GKE cluster name"
+  default     = "training-gke"
+}
+
+variable "network" {
+  type        = string
+  description = "VPC self-link or ID"
+}
+
+variable "subnetwork" {
+  type        = string
+  description = "Subnet self-link or ID"
+}
+
+variable "pods_range_name" {
+  type        = string
+  description = "Name of subnet secondary range for Pods"
+  default     = "gke-pods"
+}
+
+variable "services_range_name" {
+  type        = string
+  description = "Name of subnet secondary range for Services"
+  default     = "gke-services"
+}
+
+variable "node_count" {
+  type        = number
+  description = "Number of nodes in the node pool"
+  default     = 1
+}
+
+variable "node_machine_type" {
+  type        = string
+  description = "Machine type for GKE worker nodes"
+  default     = "e2-standard-2"
+}
+
+============================================================
+4. FILE: terraform.tfvars
+============================================================
+
+project_id          = "YOUR-GCP-PROJECT-ID"
+region              = "asia-south1"
+cluster_name        = "training-gke"
+network             = "YOUR-VPC-SELF-LINK-OR-ID"
+subnetwork          = "YOUR-SUBNET-SELF-LINK-OR-ID"
+pods_range_name     = "gke-pods"
+services_range_name = "gke-services"
+node_count          = 1
+node_machine_type   = "e2-standard-2"
+
+============================================================
+5. FILE: main.tf
+============================================================
+
+If you are creating the VPC and subnet in this same configuration, add these secondary ranges to the google_compute_subnetwork resource before creating the cluster:
+
+secondary_ip_range {
+  range_name    = "gke-pods"
+  ip_cidr_range = "10.20.0.0/16"
+}
+
+secondary_ip_range {
+  range_name    = "gke-services"
+  ip_cidr_range = "10.30.0.0/20"
+}
+
+Choose ranges that do not overlap with any existing VPC, on-premises, peered, or connected network ranges. If the subnet already exists in another Terraform state, update that configuration there rather than declaring the same subnet twice.
+
+A. GKE cluster
+
+resource "google_container_cluster" "training" {
+  name     = var.cluster_name
+  project  = var.project_id
+  location = var.region
+
+  network    = var.network
+  subnetwork = var.subnetwork
+
+  networking_mode = "VPC_NATIVE"
+
+  ip_allocation_policy {
+    cluster_secondary_range_name  = var.pods_range_name
+    services_secondary_range_name = var.services_range_name
+  }
+
+  remove_default_node_pool = true
+  initial_node_count       = 1
+
+  deletion_protection = false
+}
+
+Explanation:
+- name: cluster name.
+- project: project hosting the cluster.
+- location: region for a regional cluster; regional clusters distribute control-plane availability across zones.
+- network and subnetwork: VPC and subnet used by the cluster.
+- networking_mode = VPC_NATIVE: uses VPC alias IP ranges for Pods and Services.
+- ip_allocation_policy: selects the subnet secondary ranges.
+- remove_default_node_pool = true: removes the default node pool so worker nodes can be managed separately.
+- initial_node_count: bootstrap setting used during cluster creation when removing the default node pool.
+- deletion_protection = false: allows Terraform to delete the cluster during lab cleanup. Do not disable deletion protection casually in production.
+
+B. Separate node pool
+
+resource "google_container_node_pool" "primary" {
+  name     = "primary-pool"
+  project  = var.project_id
+  location = var.region
+  cluster  = google_container_cluster.training.name
+
+  node_count = var.node_count
+
+  node_config {
+    machine_type = var.node_machine_type
+    disk_size_gb = 30
+    disk_type    = "pd-balanced"
+
+    oauth_scopes = [
+      "https://www.googleapis.com/auth/cloud-platform"
+    ]
+  }
+}
+
+Explanation:
+- name: node pool name.
+- project and location: project and cluster region.
+- cluster: reference to the cluster; Terraform creates the cluster first.
+- node_count: number of worker nodes per node pool location/configuration.
+- node_config: worker VM configuration.
+- machine_type: worker node CPU and memory.
+- disk_size_gb and disk_type: node boot disk capacity and type.
+- oauth_scopes: access scopes for the node identity. Scopes do not replace IAM roles. For production, configure a dedicated least-privilege node service account and appropriate IAM roles.
+
+============================================================
+6. FILE: outputs.tf
+============================================================
+
+output "cluster_name" {
+  description = "GKE cluster name"
+  value       = google_container_cluster.training.name
+}
+
+output "cluster_location" {
+  description = "GKE cluster region"
+  value       = google_container_cluster.training.location
+}
+
+output "node_pool_name" {
+  description = "Managed node pool name"
+  value       = google_container_node_pool.primary.name
+}
+
+============================================================
+7. CREATE AND TEST
+============================================================
+
+Enable the Kubernetes Engine API and Compute Engine API. Ensure permissions and subnet secondary ranges are configured.
+
+Run:
+terraform init
+terraform fmt
+terraform validate
+terraform plan
+terraform apply
+
+Get credentials:
+gcloud container clusters get-credentials training-gke --region asia-south1 --project YOUR-GCP-PROJECT-ID
+
+Test:
+kubectl get nodes
+kubectl get namespaces
+
+Clean up after reviewing the plan:
+terraform destroy
+
+============================================================
+8. PRACTICE EXERCISES
+============================================================
+
+1. Explain the difference between a cluster and a node pool.
+2. Explain why Pods and Services need secondary IP ranges in this VPC-native example.
+3. Change node_count and review the plan.
+4. Change the node machine type and consider cost.
+5. Explain why node pool references the cluster name.
+6. Identify the settings that would need further hardening for production.
+
+============================================================
+9. KEY TAKEAWAYS
+============================================================
+
+- google_container_cluster manages cluster-level Kubernetes configuration.
+- google_container_node_pool manages worker nodes separately.
+- VPC-native clusters use subnet secondary ranges for Pods and Services.
+- IAM roles and OAuth scopes serve different purposes.
+- GKE resources can incur costs even when no application is deployed.
+- Treat this as a training baseline, not a production-ready cluster.

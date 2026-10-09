@@ -1,0 +1,190 @@
+TERRAFORM + GCP TRAINING
+DAY 10 — IAM AND SERVICE ACCOUNTS
+
+============================================================
+1. WHAT SERVICE ARE WE USING?
+============================================================
+
+Google Cloud Identity and Access Management (IAM) controls who can do what on which resources. IAM grants permissions through roles assigned to principals, such as users, groups, or service accounts.
+
+A service account is a non-human identity used by applications, VMs, and automation to access Google Cloud APIs.
+
+Terraform resources:
+- google_service_account: creates a service account identity.
+- google_project_iam_member: grants one principal one role on a project without taking ownership of every member assigned that role.
+- google_service_account_iam_member: optionally grants a principal a role on the service account itself, such as permission to impersonate it.
+
+Important distinction:
+Creating a service account does not automatically give it access to project resources. Access is granted separately through IAM roles.
+
+============================================================
+2. FILE: providers.tf
+============================================================
+
+terraform {
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 7.0"
+    }
+  }
+}
+
+provider "google" {
+  project = var.project_id
+  region  = var.region
+}
+
+============================================================
+3. FILE: variables.tf
+============================================================
+
+variable "project_id" {
+  type        = string
+  description = "GCP project ID"
+}
+
+variable "service_account_id" {
+  type        = string
+  description = "Short ID for the service account"
+  default     = "terraform-training-sa"
+}
+
+variable "service_account_display_name" {
+  type        = string
+  description = "Friendly display name"
+  default     = "Terraform Training Service Account"
+}
+
+variable "grant_storage_object_viewer" {
+  type        = bool
+  description = "Whether to grant read access to Cloud Storage objects at project level"
+  default     = true
+}
+
+============================================================
+4. FILE: terraform.tfvars
+============================================================
+
+project_id                    = "YOUR-GCP-PROJECT-ID"
+service_account_id            = "terraform-training-sa"
+service_account_display_name = "Terraform Training Service Account"
+grant_storage_object_viewer   = true
+
+============================================================
+5. FILE: main.tf
+============================================================
+
+A. Create a service account
+
+resource "google_service_account" "training" {
+  project      = var.project_id
+  account_id   = var.service_account_id
+  display_name = var.service_account_display_name
+  description  = "Service account created for Terraform IAM training"
+}
+
+Explanation:
+- project: project where the service account is created.
+- account_id: unique short ID for the service account in the project; follow GCP naming rules.
+- display_name: human-readable name.
+- description: purpose of the identity.
+
+B. Grant a project role (optional example)
+
+resource "google_project_iam_member" "storage_object_viewer" {
+  count   = var.grant_storage_object_viewer ? 1 : 0
+  project = var.project_id
+  role    = "roles/storage.objectViewer"
+  member  = "serviceAccount:${google_service_account.training.email}"
+}
+
+Explanation:
+- count conditionally creates this IAM grant when the variable is true.
+- project: project where the role is granted.
+- role: IAM role being granted.
+- member: principal receiving the role; here it is the service account created above.
+- roles/storage.objectViewer grants read/list access to Cloud Storage objects where the role applies. At project scope, it may grant access across buckets in the project. Prefer bucket-level scope when only one bucket needs access.
+
+C. Optional: allow a principal to impersonate the service account
+
+Only add this if the lab needs impersonation. Supply the email of a trusted user or group through a variable and understand the security implications before granting this permission.
+
+Example resource shape:
+
+resource "google_service_account_iam_member" "impersonator" {
+  service_account_id = google_service_account.training.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "user:TRUSTED-USER-EMAIL"
+}
+
+Do not leave the placeholder as-is. In a reusable configuration, define the member as a variable and grant only to the intended principal. Token Creator is powerful because it enables minting credentials as the service account.
+
+============================================================
+6. FILE: outputs.tf
+============================================================
+
+output "service_account_email" {
+  description = "Email of the created service account"
+  value       = google_service_account.training.email
+}
+
+output "service_account_name" {
+  description = "Resource name of the service account"
+  value       = google_service_account.training.name
+}
+
+output "storage_object_viewer_granted" {
+  description = "Whether the optional project-level role grant is enabled"
+  value       = var.grant_storage_object_viewer
+}
+
+============================================================
+7. TERRAFORM WORKFLOW
+============================================================
+
+Ensure the IAM API is available and the identity running Terraform has permission to create service accounts and grant IAM roles.
+
+Run:
+terraform init
+terraform fmt
+terraform validate
+terraform plan
+terraform apply
+terraform output
+
+Review IAM changes carefully before applying. After the lab, remove the resources only if they are no longer needed:
+terraform destroy
+
+============================================================
+8. PRACTICE EXERCISES
+============================================================
+
+1. Explain the difference between a user identity and a service account.
+2. Explain why a service account needs a separate IAM role grant.
+3. Set grant_storage_object_viewer to false and inspect the plan.
+4. Discuss why project-level object viewer may be broader than necessary.
+5. Research bucket-level google_storage_bucket_iam_member for a single-bucket permission.
+6. Explain the difference between google_project_iam_member and google_project_iam_binding.
+7. Explain why service account keys should not be created or committed for this lab.
+
+============================================================
+9. SECURITY NOTES
+============================================================
+
+- Follow least privilege: grant only the role and scope required.
+- Avoid broad Owner or Editor roles unless explicitly approved.
+- Prefer Application Default Credentials, service account impersonation, or Workload Identity Federation over downloaded service-account key files.
+- Do not commit secrets or service account key JSON files to Git.
+- IAM changes can affect access immediately; review terraform plan before applying.
+- google_project_iam_member is additive for a single member/role grant; avoid mixing authoritative and additive IAM resources for the same role/scope without understanding their effects.
+
+============================================================
+10. KEY TAKEAWAYS
+============================================================
+
+- IAM controls access using principals and roles.
+- A service account is an identity, not a permission by itself.
+- google_project_iam_member grants a role to one principal at project scope.
+- google_service_account_iam_member controls access to the service account itself.
+- Least privilege and scope selection are central to secure cloud infrastructure.
